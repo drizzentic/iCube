@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
 	"io/ioutil"
@@ -12,18 +11,18 @@ import (
 )
 
 type IOU struct {
-	gorm.Model
-	Name string `json:"name"`
-	Owes map[string]float64 `json:"owes"`
-	OwedBy map[string]float64 `json:"owed_by"`
-	Balance string `json:"balance"`
+	gorm.Model `json:"-"`
+	Name       string             `json:"name"`
+	Owes       map[string]float64 `json:"owes"`
+	OwedBy     map[string]float64 `json:"owed_by"`
+	Balance    float64            `json:"balance"`
 }
 type IOUs struct {
 	Iou []IOU
 }
 type User struct {
 	gorm.Model
-	Name string
+	Name string `json:"user" gorm:"index:idx_name,unique"`
 }
 type Users struct {
 	Users []string `json:"users"`
@@ -57,15 +56,11 @@ func main() {
 	log.Fatal(srv.ListenAndServe())
 }
 
-func init() {
-	//Connect()
-
-}
-
 func IOWEYOU(writer http.ResponseWriter, request *http.Request) {
-	DB.AutoMigrate(&IOUPayload{})
+
 	var iouPayload IOUPayload
 	var iouPayloads []IOUPayload
+	var user []User
 
 	body, _ := ioutil.ReadAll(request.Body)
 
@@ -75,12 +70,17 @@ func IOWEYOU(writer http.ResponseWriter, request *http.Request) {
 		Borrower: iouPayload.Borrower,
 		Amount:   iouPayload.Amount,
 	}
+	rows := DB.Table("users").Where("name", iou.Borrower).Or("name", iou.Lender).Find(&user)
+
+	if rows.RowsAffected < 2 {
+		json.NewEncoder(writer).Encode("You cannot create i owe you for users not in system")
+		return
+	}
 	DB.Create(&iou)
 	DB.Table("iou_payloads").Find(&iouPayloads)
 	writer.Header().Set("Content-Type", "application/json")
-	//gerneat ledger
+	//generate ledger
 	json.Marshal(&iouPayloads)
-	fmt.Print(iouPayloads)
 	a := fetchUserLedger(iouPayloads, nil)
 	json.NewEncoder(writer).Encode(a)
 }
@@ -98,30 +98,39 @@ func ListUsers(writer http.ResponseWriter, request *http.Request) {
 	DB.Table("users").Where("name IN ?", users.Users).Order("name desc").Find(&user)
 
 	DB.Table("iou_payloads").Where("borrower IN ?", users.Users).Or("lender IN ?", users.Users).Find(&iouPayloads)
-	a:=fetchUserLedger(iouPayloads, user)
+	a := fetchUserLedger(iouPayloads, user)
 	writer.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(writer).Encode(a)
 }
 
 func CreateUser(writer http.ResponseWriter, request *http.Request) {
 	var user User
-
+	var iouPayloads []IOUPayload
 	DB.AutoMigrate(&User{})
+	DB.AutoMigrate(&IOUPayload{})
 
 	body, _ := ioutil.ReadAll(request.Body)
 
 	json.Unmarshal(body, &user)
-
+	//Return nil when no user object is passed
+	if user.Name == "" {
+		json.NewEncoder(writer).Encode(nil)
+		return
+	}
 	row := DB.Create(&User{
 		gorm.Model{},
 		user.Name,
 	})
 	if row.RowsAffected > 0 {
+		var users []User
+		b := append(users, user)
+		DB.Table("iou_payloads").Where("borrower", user.Name).Or("lender", user.Name).Find(&iouPayloads)
+		a := fetchUserLedger(iouPayloads, b)
 		writer.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(writer).Encode(&user)
+		json.NewEncoder(writer).Encode(a)
 	} else {
 		writer.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(writer).Encode(map[int]string{400: "User was not created"})
+		json.NewEncoder(writer).Encode(nil)
 	}
 }
 
@@ -129,40 +138,44 @@ func fetchUserLedger(a []IOUPayload, filteredUsers []User) []IOU {
 	var user []User
 	var userObject = []IOU{}
 	user = filteredUsers
-	if filteredUsers  == nil {
+	if filteredUsers == nil {
 		DB.Find(&user)
 	}
 	for i, _ := range user {
 		var userLedger IOU
-		owees:= make(map[string]float64)
-		owed:= make(map[string]float64)
-		owedamount:=0.0
-		oweeamount:=0.0
+		owees := make(map[string]float64)
+		owed := make(map[string]float64)
+		owedamount := 0.0
+		oweeamount := 0.0
+		balance := 0.0
 		for k, _ := range a {
 			if a[k].Lender == user[i].Name {
-				borrower :=a[k].Borrower
-				oweeamount=oweeamount + a[k].Amount
-				owed[borrower]=oweeamount
+				borrower := a[k].Borrower
+				oweeamount = oweeamount + a[k].Amount
+				balance = balance - owedamount
+				owed[borrower] = oweeamount
 			} else if a[k].Borrower == user[i].Name {
-				lender :=a[k].Lender
-				owedamount=owedamount + a[k].Amount
-				owees[lender]= owedamount
+				lender := a[k].Lender
+				owedamount = owedamount + a[k].Amount
+				balance = balance + oweeamount
+				owees[lender] = owedamount
 			}
-
-
-
 		}
 		userLedger = IOU{
 			Name:    user[i].Name,
 			Owes:    owees,
 			OwedBy:  owed,
-			Balance: "",
+			Balance: balancesSum(owed) - balancesSum(owees),
 		}
-
-		fmt.Print("aye",owees)
 		userObject = append(userObject, userLedger)
 	}
-	//fmt.Printf("2**%d = %d\n", i, v)
-
 	return userObject
+}
+
+func balancesSum(owed map[string]float64) float64 {
+	balance := 0.0
+	for i, _ := range owed {
+		balance += owed[i]
+	}
+	return balance
 }
