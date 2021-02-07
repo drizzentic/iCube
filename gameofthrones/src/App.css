@@ -49,7 +49,7 @@ td {
   border-collapse: collapse;
 }
 td {
-  padding: 1rem 0.4rem;
+  padding: .61rem 0.4rem;
 }
 table {
   margin: 0 auto;
@@ -73,7 +73,6 @@ thead {
   color: #f8f8f8;
 }
 .links {
-  /* border: 1px solid; */
   width: 100%;
   height: 99vh;
   display: flex;
@@ -81,8 +80,6 @@ thead {
   justify-content: center;
   flex-direction: column;
 }
-
 ul {
   list-style: none;
-
 }
