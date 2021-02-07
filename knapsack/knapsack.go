@@ -19,8 +19,8 @@ type Knapsack struct {
 
 func main() {
 	var Items Knapsack
-
-	jsonPayload := `{"Items":[{"weight":5,"value":10},{"weight":4,"value":40},{"weight":6,"value":30},{"weight":4,"value":98}]}`
+	// To change test case use different json
+	jsonPayload := `{"Items":[{"weight":5,"value":10},{"weight":4,"value":40},{"weight":6,"value":30},{"weight":4,"value":50}]}`
 
 	err := json.Unmarshal([]byte(jsonPayload), &Items)
 	if err != nil {

@@ -40,10 +40,12 @@ func main() {
 
 	DB = Connect()
 	r := mux.NewRouter()
-	r.PathPrefix("/api/v1")
+	// Urls for accessing the rest api
 	r.HandleFunc("/add", CreateUser).Methods(http.MethodPost)
 	r.HandleFunc("/users", ListUsers).Methods(http.MethodGet)
 	r.HandleFunc("/iou", IOWEYOU).Methods(http.MethodPost)
+
+	// Starts the http server
 
 	srv := &http.Server{
 		Handler: r,
@@ -52,6 +54,7 @@ func main() {
 		WriteTimeout: 15 * time.Second,
 		ReadTimeout:  15 * time.Second,
 	}
+	// Listen for http output
 
 	log.Fatal(srv.ListenAndServe())
 }
@@ -64,12 +67,19 @@ func IOWEYOU(writer http.ResponseWriter, request *http.Request) {
 
 	body, _ := ioutil.ReadAll(request.Body)
 
+	// Read and parse the request JSON
+
 	json.Unmarshal(body, &iouPayload)
+
+	// Create an IOU
 	iou := IOUPayload{
 		Lender:   iouPayload.Lender,
 		Borrower: iouPayload.Borrower,
 		Amount:   iouPayload.Amount,
 	}
+
+	// Check if the users exists in the database before creating an iou
+
 	rows := DB.Table("users").Where("name", iou.Borrower).Or("name", iou.Lender).Find(&user)
 
 	if rows.RowsAffected < 2 {
@@ -77,10 +87,13 @@ func IOWEYOU(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	DB.Create(&iou)
+
 	DB.Table("iou_payloads").Find(&iouPayloads)
 	writer.Header().Set("Content-Type", "application/json")
-	//generate ledger
+
 	json.Marshal(&iouPayloads)
+
+	// Fetch the user object for the users
 	a := fetchUserLedger(iouPayloads, nil)
 	json.NewEncoder(writer).Encode(a)
 }
@@ -94,10 +107,14 @@ func ListUsers(writer http.ResponseWriter, request *http.Request) {
 	body, _ := ioutil.ReadAll(request.Body)
 
 	json.Unmarshal(body, &users)
+	// Retrieve Users from DB
 
 	DB.Table("users").Where("name IN ?", users.Users).Order("name desc").Find(&user)
 
+	// Retrieve IOU payloads for the users
 	DB.Table("iou_payloads").Where("borrower IN ?", users.Users).Or("lender IN ?", users.Users).Find(&iouPayloads)
+
+	// Fetch the user object for the users parsed
 	a := fetchUserLedger(iouPayloads, user)
 	writer.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(writer).Encode(a)
@@ -106,6 +123,7 @@ func ListUsers(writer http.ResponseWriter, request *http.Request) {
 func CreateUser(writer http.ResponseWriter, request *http.Request) {
 	var user User
 	var iouPayloads []IOUPayload
+	// Create the tables on first instance
 	DB.AutoMigrate(&User{})
 	DB.AutoMigrate(&IOUPayload{})
 
@@ -124,7 +142,9 @@ func CreateUser(writer http.ResponseWriter, request *http.Request) {
 	if row.RowsAffected > 0 {
 		var users []User
 		b := append(users, user)
+		// Retrieve the initial user object for the created user
 		DB.Table("iou_payloads").Where("borrower", user.Name).Or("lender", user.Name).Find(&iouPayloads)
+		// Fetch the user object for the users parsed// Fetch the user object for the users parsed
 		a := fetchUserLedger(iouPayloads, b)
 		writer.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(writer).Encode(a)
@@ -142,6 +162,7 @@ func fetchUserLedger(a []IOUPayload, filteredUsers []User) []IOU {
 		DB.Find(&user)
 	}
 	for i, _ := range user {
+		// Generate the User object
 		var userLedger IOU
 		owees := make(map[string]float64)
 		owed := make(map[string]float64)
